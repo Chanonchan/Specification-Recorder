@@ -478,8 +478,8 @@ body {
 .dot--in { background: var(--in); }
 .dot--over { background: var(--over); }
 
-.summary-actions { margin-bottom: 16px; }
-.summary-actions .btn { width: 100%; }
+.summary-actions { margin-bottom: 16px; display: flex; gap: 10px; }
+.summary-actions .btn { flex: 1 1 0; width: auto; }
 
 /* ---------- All values ---------- */
 .all-values__title { font-size: 15px; margin: 0 0 10px; }
