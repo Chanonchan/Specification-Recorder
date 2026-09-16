@@ -9,9 +9,9 @@ var ASSETS = [
   "./app.js?v=39",
   "./vendor/html2canvas.min.js?v=39",
   "./manifest.json",
-  "./icons/icon-192.png?v=34",
-  "./icons/icon-512.png?v=34",
-  "./icons/icon-maskable-512.png?v=34"
+  "./icons/icon-192.png?v=39",
+  "./icons/icon-512.png?v=39",
+  "./icons/icon-maskable-512.png?v=39"
 ];
 
 self.addEventListener("install", function (e) {
