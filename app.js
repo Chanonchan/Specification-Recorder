@@ -816,46 +816,14 @@
   }
 
   /* ---------- Save summary as image ---------- */
-  // The whole summary is drawn top-to-bottom onto a canvas with the native 2D
-  // API (not html2canvas / SVG foreignObject) — foreignObject taints the canvas
-  // on iOS Safari, which would make toBlob()/share fail inside an installed PWA.
-  var IMG = {
-    bg: "#0b1220", card: "#141d2e", ink: "#e8eef7", muted: "#7e8aa3",
-    line: "#202c44", under: "#3b82f6", inSp: "#10b981", over: "#ef4444",
-    teal: "#2dd4bf",
-    ff: '-apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
-  };
-  function imgFont(px, w) { return (w || 400) + " " + px + "px " + IMG.ff; }
-  function imgRR(ctx, x, y, w, h, r) {
-    r = Math.min(r, w / 2, h / 2);
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
-  }
-  function imgEllipsize(ctx, s, maxW) {
-    if (ctx.measureText(s).width <= maxW) return s;
-    while (s.length > 1 && ctx.measureText(s + "…").width > maxW) s = s.slice(0, -1);
-    return s + "…";
-  }
+  // Captures the summary page as it is actually rendered — the real DOM and
+  // CSS — at its full scroll height, so the PNG is one long image from top to
+  // bottom in a single pass (no stitching, no seams, nothing re-invented).
+  // html2canvas is vendored locally so this keeps working offline.
 
-  function nowStr() {
-    var d = new Date();
-    try {
-      return d.toLocaleString(undefined, {
-        day: "2-digit", month: "short", year: "numeric",
-        hour: "2-digit", minute: "2-digit"
-      });
-    } catch (e) {
-      return d.toISOString().slice(0, 16).replace("T", " ");
-    }
-  }
-
-  function collectSummaryData() {
-    var s = stats(state.values);
+  // html2canvas cannot parse conic-gradient, which is what paints the in-spec
+  // donut, so redraw that ring on a canvas and hand it over as a plain image.
+  function ringImageURL(size) {
     var lsl = state.lsl === "" ? null : Number(state.lsl);
     var usl = state.usl === "" ? null : Number(state.usl);
     if (lsl !== null && !isFinite(lsl)) lsl = null;
@@ -870,192 +838,34 @@
         else if (usl !== null && v > usl) over++;
       }
     }
-    var spec = { lsl: lsl, usl: usl, under: under, over: over, inSpec: n - under - over, n: n, haveSpec: haveSpec };
-    var values = state.values.map(function (v, i) {
-      var tag = "";
-      if (lsl !== null && v < lsl) tag = "UNDER";
-      else if (usl !== null && v > usl) tag = "OVER";
-      return { k: i + 1, v: v, tag: tag };
-    });
-    var title = state.recordName.trim() || specDisplay();
-    return {
-      title: title ? ("Summary — " + title) : "Summary",
-      dateStr: nowStr(), s: s, spec: spec,
-      dist: distributionBins(s), values: values
-    };
-  }
 
-  function drawSummaryCanvas(data) {
-    var S = 2, W = 720, PAD = 28, innerW = W - 2 * PAD;
-
-    function render(ctx) {
-      var y = PAD;
-
-      ctx.textBaseline = "alphabetic";
-      ctx.fillStyle = IMG.ink; ctx.font = imgFont(30, 800); ctx.textAlign = "left";
-      ctx.fillText(imgEllipsize(ctx, data.title, innerW), PAD, y + 30);
-      y += 42;
-      ctx.fillStyle = IMG.muted; ctx.font = imgFont(15, 500);
-      ctx.fillText(data.dateStr, PAD, y + 14);
-      y += 26;
-      ctx.strokeStyle = IMG.line; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(PAD, y + 8); ctx.lineTo(W - PAD, y + 8); ctx.stroke();
-      y += 26;
-
-      var cards = [
-        ["Replications", data.s.n || 0],
-        ["Average", data.s.n ? fmt(data.s.avg) : "–"],
-        ["Median", data.s.n ? fmt(data.s.median) : "–"],
-        ["Mode", data.s.n ? (data.s.mode === null ? "—" : fmt(data.s.mode)) : "–"],
-        ["Minimum", data.s.n ? fmt(data.s.min) : "–"],
-        ["Maximum", data.s.n ? fmt(data.s.max) : "–"],
-        ["Range", data.s.n ? fmt(data.s.range) : "–"]
-      ];
-      var gap = 14, cols = 2, cardW = (innerW - gap * (cols - 1)) / cols, cardH = 76;
-      for (var i = 0; i < cards.length; i++) {
-        var cx = PAD + (i % cols) * (cardW + gap);
-        var cy = y + Math.floor(i / cols) * (cardH + gap);
-        ctx.fillStyle = IMG.card; imgRR(ctx, cx, cy, cardW, cardH, 14); ctx.fill();
-        ctx.fillStyle = IMG.muted; ctx.font = imgFont(12, 700); ctx.textAlign = "left";
-        ctx.fillText(String(cards[i][0]).toUpperCase(), cx + 16, cy + 26);
-        ctx.fillStyle = IMG.ink; ctx.font = imgFont(26, 800);
-        ctx.fillText(imgEllipsize(ctx, String(cards[i][1]), cardW - 32), cx + 16, cy + 58);
-      }
-      var rows = Math.ceil(cards.length / cols);
-      y += rows * cardH + (rows - 1) * gap + 30;
-
-      function sectionHeader(label) {
-        ctx.fillStyle = IMG.teal; imgRR(ctx, PAD, y - 2, 4, 20, 2); ctx.fill();
-        ctx.fillStyle = IMG.ink; ctx.font = imgFont(19, 800); ctx.textAlign = "left";
-        ctx.fillText(label, PAD + 14, y + 16);
-        y += 40;
-      }
-
-      // Specification
-      sectionHeader("Specification");
-      var sp = data.spec;
-      ctx.font = imgFont(15, 600); ctx.textAlign = "left";
-      function chip(txt, x) {
-        var w = ctx.measureText(txt).width + 28;
-        ctx.fillStyle = IMG.card; imgRR(ctx, x, y, w, 34, 10); ctx.fill();
-        ctx.fillStyle = IMG.ink; ctx.fillText(txt, x + 14, y + 22);
-        return w;
-      }
-      var w1 = chip("LSL  " + (sp.lsl === null ? "not set" : fmt(sp.lsl)), PAD);
-      chip("USL  " + (sp.usl === null ? "not set" : fmt(sp.usl)), PAD + w1 + 12);
-      y += 48;
-
-      var catRows = [
-        ["Under spec", sp.under, IMG.under],
-        ["In spec", sp.inSpec, IMG.inSp],
-        ["Over spec", sp.over, IMG.over]
-      ];
-      var n = sp.n || 0;
-      for (var r = 0; r < catRows.length; r++) {
-        var cnt = catRows[r][1], col = catRows[r][2];
-        var pctv = (sp.haveSpec && n) ? Math.round((cnt / n) * 1000) / 10 : 0;
-        var ry = y + r * 44;
-        ctx.fillStyle = IMG.muted; ctx.font = imgFont(14, 600); ctx.textAlign = "left";
-        ctx.fillText(catRows[r][0], PAD, ry + 14);
-        var barX = PAD, barY = ry + 22, barW = innerW - 120, barH = 12;
-        ctx.fillStyle = IMG.line; imgRR(ctx, barX, barY, barW, barH, 6); ctx.fill();
-        if (sp.haveSpec && n) {
-          ctx.fillStyle = col; imgRR(ctx, barX, barY, Math.max(barW * cnt / n, cnt ? 6 : 0), barH, 6); ctx.fill();
-        }
-        ctx.fillStyle = IMG.ink; ctx.font = imgFont(15, 800); ctx.textAlign = "right";
-        ctx.fillText(sp.haveSpec ? (pctv + "%  ·  " + cnt) : String(cnt), W - PAD, ry + 20);
-      }
-      y += catRows.length * 44 + 18;
-
-      // Distribution
-      function divider(label) {
-        ctx.strokeStyle = IMG.line; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
-        ctx.beginPath(); ctx.moveTo(PAD, y + 12); ctx.lineTo(W - PAD, y + 12); ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.font = imgFont(12, 700); ctx.textAlign = "center";
-        var tw = ctx.measureText(label).width + 16;
-        ctx.fillStyle = IMG.bg; ctx.fillRect(W / 2 - tw / 2, y + 4, tw, 16);
-        ctx.fillStyle = IMG.muted; ctx.fillText(label, W / 2, y + 16);
-        y += 24;
-      }
-      sectionHeader("Distribution");
-      var d = data.dist;
-      if (d && d.bins.length) {
-        var maxCount = 0;
-        d.bins.forEach(function (b) { if (b.count > maxCount) maxCount = b.count; });
-        var lblW = 74, cntW = 42, trackX = PAD + lblW, trackW = innerW - lblW - cntW, rowH = 26;
-        var prev = null;
-        d.bins.forEach(function (b) {
-          if (d.hasSpec && prev !== null) {
-            if (prev === "under" && b.cls !== "under" && d.lsl !== null) divider("LSL = " + fmt(d.lsl));
-            if (prev !== "over" && b.cls === "over" && d.usl !== null) divider("USL = " + fmt(d.usl));
-          }
-          prev = b.cls;
-          var col = b.cls === "under" ? IMG.under : b.cls === "over" ? IMG.over : IMG.inSp;
-          ctx.fillStyle = IMG.muted; ctx.font = imgFont(13, 600); ctx.textAlign = "right";
-          ctx.fillText(b.lo.toFixed(d.dec), PAD + lblW - 12, y + 16);
-          ctx.fillStyle = IMG.line; imgRR(ctx, trackX, y + 6, trackW, 13, 6); ctx.fill();
-          if (b.count) { ctx.fillStyle = col; imgRR(ctx, trackX, y + 6, Math.max(trackW * b.count / maxCount, 6), 13, 6); ctx.fill(); }
-          ctx.fillStyle = IMG.ink; ctx.font = imgFont(13, 700); ctx.textAlign = "left";
-          ctx.fillText(String(b.count), trackX + trackW + 10, y + 17);
-          y += rowH;
-        });
-      }
-      y += 12;
-
-      // All replications
-      sectionHeader("All replications (" + data.values.length + ")");
-      var vals = data.values, cnt2 = vals.length;
-      var vcols = cnt2 <= 10 ? 1 : cnt2 <= 30 ? 2 : cnt2 <= 80 ? 3 : 4;
-      var vgap = 16, vcolW = (innerW - vgap * (vcols - 1)) / vcols, vrowH = 30;
-      var vrows = Math.ceil(cnt2 / vcols) || 0;
-      for (var vi = 0; vi < cnt2; vi++) {
-        var colI = Math.floor(vi / vrows), rowI = vi % vrows;
-        var vx = PAD + colI * (vcolW + vgap), vy = y + rowI * vrowH;
-        ctx.fillStyle = (vi % 2 === 0) ? IMG.card : "rgba(20,29,46,0.45)";
-        imgRR(ctx, vx, vy, vcolW, vrowH - 6, 7); ctx.fill();
-        var it = vals[vi];
-        if (it.tag) {
-          ctx.fillStyle = it.tag === "UNDER" ? IMG.under : IMG.over;
-          imgRR(ctx, vx, vy, 4, vrowH - 6, 2); ctx.fill();
-        }
-        ctx.fillStyle = IMG.muted; ctx.font = imgFont(12, 600); ctx.textAlign = "left";
-        ctx.fillText("Rep " + it.k, vx + 12, vy + 16);
-        ctx.fillStyle = it.tag ? (it.tag === "UNDER" ? IMG.under : IMG.over) : IMG.ink;
-        ctx.font = imgFont(14, 800); ctx.textAlign = "right";
-        ctx.fillText(fmt(it.v), vx + vcolW - 12, vy + 16);
-      }
-      y += vrows * vrowH + 14;
-
-      // Footer
-      ctx.strokeStyle = IMG.line; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(W - PAD, y); ctx.stroke();
-      y += 8;
-      ctx.fillStyle = IMG.muted; ctx.font = imgFont(13, 600); ctx.textAlign = "center";
-      ctx.fillText("Specification Recorder · v. 1.0 · by Chan", W / 2, y + 14);
-      y += 26;
-
-      return y + PAD;
-    }
-
-    // Measure on a tiny throwaway canvas, then draw for real at the true height.
-    var tmp = document.createElement("canvas"); tmp.width = 8; tmp.height = 8;
-    var H = Math.ceil(render(tmp.getContext("2d")));
     var cv = document.createElement("canvas");
-    cv.width = W * S; cv.height = H * S;
-    var ctx = cv.getContext("2d");
-    ctx.scale(S, S);
-    ctx.fillStyle = IMG.bg; ctx.fillRect(0, 0, W, H);
-    render(ctx);
-    return cv;
+    cv.width = cv.height = size;
+    var x = cv.getContext("2d");
+    var r = size / 2;
+    // conic-gradient starts at 12 o'clock and runs clockwise; arc starts at 3.
+    function slice(from, to, color) {
+      if (to <= from) return;
+      x.beginPath();
+      x.moveTo(r, r);
+      x.arc(r, r, r, -Math.PI / 2 + from * 2 * Math.PI, -Math.PI / 2 + to * 2 * Math.PI);
+      x.closePath();
+      x.fillStyle = color;
+      x.fill();
+    }
+    if (!haveSpec) {
+      slice(0, 1, "#202c44");
+    } else {
+      var pu = under / n, pi = (n - under - over) / n;
+      slice(0, pu, "#3b82f6");
+      slice(pu, pu + pi, "#10b981");
+      slice(pu + pi, 1, "#ef4444");
+    }
+    return cv.toDataURL("image/png");
   }
 
-  function saveImage() {
-    if (state.values.length === 0) {
-      window.alert("Nothing to save yet — add some replications first.");
-      return;
-    }
-    var cv = drawSummaryCanvas(collectSummaryData());
+  // Share sheet on mobile (so "Save Image" puts it in Photos), download on desktop.
+  function exportCanvas(cv) {
     var displayName = state.recordName.trim() || specDisplay() || "Specification Recorder";
     var filename =
       (state.recordName.trim() || specDisplay() || "record_qc")
@@ -1064,7 +874,8 @@
     function downloadURL(url) {
       try {
         var a = document.createElement("a");
-        a.href = url; a.download = filename;
+        a.href = url;
+        a.download = filename;
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
       } catch (e) { /* ignore */ }
@@ -1074,8 +885,6 @@
 
     cv.toBlob(function (blob) {
       if (!blob) { downloadURL(cv.toDataURL("image/png")); return; }
-      // Prefer the native share sheet on mobile (Save to Photos/Files, message,
-      // etc.) — a blob download often fails inside an installed PWA on iOS.
       try {
         var file = new File([blob], filename, { type: "image/png" });
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -1086,6 +895,83 @@
       } catch (e) { /* fall through to download */ }
       downloadURL(URL.createObjectURL(blob));
     }, "image/png");
+  }
+
+  function saveImage() {
+    if (state.values.length === 0) {
+      window.alert("Nothing to save yet — add some replications first.");
+      return;
+    }
+    if (typeof html2canvas !== "function") {
+      window.alert("Image capture isn't ready yet — open the app once with a connection, then try again.");
+      return;
+    }
+
+    var page = els.pageSummary;
+    var btn = els.saveImgBtn;
+    var label = btn ? btn.textContent : "";
+    if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+    function done() { if (btn) { btn.disabled = false; btn.textContent = label; } }
+
+    // The Export/Save buttons are hidden in the capture (a saved summary
+    // shouldn't contain its own buttons), so drop their height from the total.
+    var actionsEl = page.querySelector(".summary-actions");
+    var cut = 0;
+    if (actionsEl) {
+      var acs = window.getComputedStyle(actionsEl);
+      cut = actionsEl.offsetHeight +
+        (parseFloat(acs.marginTop) || 0) + (parseFloat(acs.marginBottom) || 0);
+    }
+    var fullH = page.scrollHeight - cut;
+    var ring = ringImageURL(240);
+
+    html2canvas(page, {
+      backgroundColor: "#0b1220",
+      scale: Math.min(window.devicePixelRatio || 2, 3),
+      logging: false,
+      useCORS: true,
+      width: page.clientWidth,
+      height: fullH,
+      windowWidth: document.documentElement.clientWidth,
+      windowHeight: fullH + 400,
+      scrollX: 0,
+      scrollY: 0,
+      // The clone is off-screen, so expanding it there captures the whole page
+      // without the visible page ever moving.
+      onclone: function (doc) {
+        var el = doc.getElementById("pageSummary");
+        if (el) {
+          el.style.height = "auto";
+          el.style.maxHeight = "none";
+          el.style.overflow = "visible";
+        }
+        var app = doc.querySelector(".app");
+        if (app) {
+          app.style.height = "auto";
+          app.style.maxHeight = "none";
+          app.style.overflow = "visible";
+        }
+        if (doc.body) {
+          doc.body.style.position = "static";
+          doc.body.style.height = "auto";
+          doc.body.style.overflow = "visible";
+        }
+        if (doc.documentElement) {
+          doc.documentElement.style.height = "auto";
+          doc.documentElement.style.overflow = "visible";
+        }
+        var acts = doc.querySelector(".summary-actions");
+        if (acts) acts.style.display = "none";
+        var r = doc.getElementById("specRing");
+        if (r) r.style.background = "url('" + ring + "') center / 100% 100% no-repeat";
+      }
+    }).then(function (cv) {
+      exportCanvas(cv);
+      done();
+    })["catch"](function () {
+      done();
+      window.alert("Couldn't create the image. Please try again.");
+    });
   }
 
   /* ---------- Navigation ---------- */
