@@ -24,16 +24,12 @@ button { touch-action: manipulation; }
   user-select: none;
 }
 
-html { height: 100%; overflow: hidden; overscroll-behavior: none; }
+html { height: 100%; overscroll-behavior: none; }
 body {
   margin: 0;
   padding: 0;
-  /* Lock to the viewport without position:fixed — a fixed body stops text
-     inputs from focusing / raising the keyboard in an iOS home-screen PWA
-     (works in a Safari tab, fails once installed). A static full-height,
-     overflow-hidden body gives the same no-rubber-band lock and keeps
-     inputs focusable. */
-  height: 100%;
+  position: fixed;             /* lock to the viewport: no document rubber-band */
+  inset: 0;
   overflow: hidden;            /* the app fills the screen; pages scroll inside */
   overscroll-behavior: none;
   background: var(--bg);
@@ -72,7 +68,7 @@ body {
   width: 100%;
   margin-top: 2px;
   padding: 2px 0;
-  font-size: 16px;
+  font-size: 13px;
   color: #fff;
   background: transparent;
   border: none;
@@ -132,7 +128,7 @@ body {
 
 .page--entry .entry-actions .btn { padding: 9px; font-size: 14px; }
 .page--entry .spec-field { font-size: 10px; }
-.page--entry .spec-field input { padding: 7px 9px; font-size: 16px; }
+.page--entry .spec-field input { padding: 7px 9px; font-size: 15px; }
 
 /* Mode toggle (Quick tap / Manual) */
 .mode-toggle {
@@ -482,8 +478,8 @@ body {
 .dot--in { background: var(--in); }
 .dot--over { background: var(--over); }
 
-.summary-actions { margin-bottom: 16px; display: flex; gap: 10px; }
-.summary-actions .btn { flex: 1 1 0; width: auto; }
+.summary-actions { margin-bottom: 16px; }
+.summary-actions .btn { width: 100%; }
 
 /* ---------- All values ---------- */
 .all-values__title { font-size: 15px; margin: 0 0 10px; }
