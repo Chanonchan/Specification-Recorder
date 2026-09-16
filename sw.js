@@ -1,13 +1,13 @@
 /* Record QC service worker — network-first so updates always reach the
  * device, with a cache fallback for offline use. Asset URLs are versioned
  * (?v=N) so a new build can never be masked by a stale cache. */
-var CACHE = "recordqc-v38";
+var CACHE = "recordqc-v39";
 var ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=38",
-  "./app.js?v=38",
-  "./vendor/html2canvas.min.js?v=38",
+  "./styles.css?v=39",
+  "./app.js?v=39",
+  "./vendor/html2canvas.min.js?v=39",
   "./manifest.json",
   "./icons/icon-192.png?v=34",
   "./icons/icon-512.png?v=34",

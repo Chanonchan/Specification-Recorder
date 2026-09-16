@@ -480,9 +480,25 @@ body {
 
 .summary-actions { margin-bottom: 16px; }
 .summary-actions .btn { width: 100%; }
+.summary-actions .btn + .btn { margin-top: 10px; }
 
 /* ---------- All values ---------- */
-.all-values__title { font-size: 15px; margin: 0 0 10px; }
+/* Tap the header to fold the list away — handy for a shorter saved image. */
+.all-values__title {
+  font-size: 15px;
+  margin: 0 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.all-values__chev { color: var(--muted); font-size: 13px; transition: transform 0.15s ease; }
+.all-values.is-collapsed .all-values__chev { transform: rotate(-90deg); }
+.all-values.is-collapsed .all-values__list { display: none; }
+.all-values.is-collapsed .all-values__title { margin-bottom: 0; }
 .all-values__list { margin: 0; padding-left: 0; list-style: none; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
 .all-values__list li {
   display: flex;

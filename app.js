@@ -14,7 +14,8 @@
     mode: "quick",      // "quick" (value buttons) or "manual" (keypad)
     gridMin: null,      // lowest value button
     gridMax: null,      // highest value button
-    step: 0.1           // user-chosen spacing between value buttons
+    step: 0.1,          // user-chosen spacing between value buttons
+    valuesCollapsed: false  // "All replications" folded away on the summary
   };
 
   /* ---------- Element refs ---------- */
@@ -48,6 +49,9 @@
     histogram: $("histogram"),
     histLegend: $("histLegend"),
     allValuesList: $("allValuesList"),
+    allValuesBox: $("allValuesBox"),
+    allValuesToggle: $("allValuesToggle"),
+    allValuesChev: $("allValuesChev"),
     exportBtn: $("exportBtn"),
     saveImgBtn: $("saveImgBtn"),
     // nav
@@ -73,6 +77,7 @@
         state.gridMin = typeof parsed.gridMin === "number" ? parsed.gridMin : null;
         state.gridMax = typeof parsed.gridMax === "number" ? parsed.gridMax : null;
         state.step = typeof parsed.step === "number" && parsed.step > 0 ? parsed.step : 0.1;
+        state.valuesCollapsed = parsed.valuesCollapsed === true;
       }
     } catch (e) { /* ignore */ }
   }
@@ -380,6 +385,7 @@
     renderSpec(s);
     renderHistogram(s);
     renderAllValues();
+    applyValuesCollapsed();
   }
 
   /* ---------- Histogram (frequency distribution) ---------- */
@@ -580,6 +586,22 @@
       li.appendChild(right);
       els.allValuesList.appendChild(li);
     }
+  }
+
+  // Folding the list is purely visual — the CSV export and the saved image
+  // both follow whatever is on screen, so collapsing it shortens the capture.
+  function applyValuesCollapsed() {
+    if (!els.allValuesBox) return;
+    var collapsed = state.valuesCollapsed === true;
+    els.allValuesBox.classList.toggle("is-collapsed", collapsed);
+    if (els.allValuesChev) els.allValuesChev.textContent = collapsed ? "\u25B8" : "\u25BE";
+    if (els.allValuesToggle) els.allValuesToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  }
+
+  function toggleValuesCollapsed() {
+    state.valuesCollapsed = !state.valuesCollapsed;
+    save();
+    applyValuesCollapsed();
   }
 
   function renderAll() {
@@ -1018,6 +1040,13 @@
     els.undoBtn.addEventListener("click", undoLast);
     els.clearBtn.addEventListener("click", clearAll);
     els.exportBtn.addEventListener("click", exportCSV);
+
+    if (els.allValuesToggle) {
+      els.allValuesToggle.addEventListener("click", toggleValuesCollapsed);
+      els.allValuesToggle.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleValuesCollapsed(); }
+      });
+    }
 
     els.modeQuick.addEventListener("click", function () { setMode("quick"); });
     els.modeManual.addEventListener("click", function () { setMode("manual"); });
