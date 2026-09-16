@@ -49,6 +49,7 @@
     histLegend: $("histLegend"),
     allValuesList: $("allValuesList"),
     exportBtn: $("exportBtn"),
+    saveImgBtn: $("saveImgBtn"),
     // nav
     pageEntry: $("pageEntry"), pageSummary: $("pageSummary"),
     tabEntry: $("tabEntry"), tabSummary: $("tabSummary")
@@ -814,6 +815,279 @@
     downloadCSV(csv, filename);
   }
 
+  /* ---------- Save summary as image ---------- */
+  // The whole summary is drawn top-to-bottom onto a canvas with the native 2D
+  // API (not html2canvas / SVG foreignObject) — foreignObject taints the canvas
+  // on iOS Safari, which would make toBlob()/share fail inside an installed PWA.
+  var IMG = {
+    bg: "#0b1220", card: "#141d2e", ink: "#e8eef7", muted: "#7e8aa3",
+    line: "#202c44", under: "#3b82f6", inSp: "#10b981", over: "#ef4444",
+    teal: "#2dd4bf",
+    ff: '-apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+  };
+  function imgFont(px, w) { return (w || 400) + " " + px + "px " + IMG.ff; }
+  function imgRR(ctx, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function imgEllipsize(ctx, s, maxW) {
+    if (ctx.measureText(s).width <= maxW) return s;
+    while (s.length > 1 && ctx.measureText(s + "…").width > maxW) s = s.slice(0, -1);
+    return s + "…";
+  }
+
+  function nowStr() {
+    var d = new Date();
+    try {
+      return d.toLocaleString(undefined, {
+        day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit"
+      });
+    } catch (e) {
+      return d.toISOString().slice(0, 16).replace("T", " ");
+    }
+  }
+
+  function collectSummaryData() {
+    var s = stats(state.values);
+    var lsl = state.lsl === "" ? null : Number(state.lsl);
+    var usl = state.usl === "" ? null : Number(state.usl);
+    if (lsl !== null && !isFinite(lsl)) lsl = null;
+    if (usl !== null && !isFinite(usl)) usl = null;
+
+    var n = state.values.length, under = 0, over = 0;
+    var haveSpec = n > 0 && (lsl !== null || usl !== null);
+    if (haveSpec) {
+      for (var i = 0; i < n; i++) {
+        var v = state.values[i];
+        if (lsl !== null && v < lsl) under++;
+        else if (usl !== null && v > usl) over++;
+      }
+    }
+    var spec = { lsl: lsl, usl: usl, under: under, over: over, inSpec: n - under - over, n: n, haveSpec: haveSpec };
+    var values = state.values.map(function (v, i) {
+      var tag = "";
+      if (lsl !== null && v < lsl) tag = "UNDER";
+      else if (usl !== null && v > usl) tag = "OVER";
+      return { k: i + 1, v: v, tag: tag };
+    });
+    var title = state.recordName.trim() || specDisplay();
+    return {
+      title: title ? ("Summary — " + title) : "Summary",
+      dateStr: nowStr(), s: s, spec: spec,
+      dist: distributionBins(s), values: values
+    };
+  }
+
+  function drawSummaryCanvas(data) {
+    var S = 2, W = 720, PAD = 28, innerW = W - 2 * PAD;
+
+    function render(ctx) {
+      var y = PAD;
+
+      ctx.textBaseline = "alphabetic";
+      ctx.fillStyle = IMG.ink; ctx.font = imgFont(30, 800); ctx.textAlign = "left";
+      ctx.fillText(imgEllipsize(ctx, data.title, innerW), PAD, y + 30);
+      y += 42;
+      ctx.fillStyle = IMG.muted; ctx.font = imgFont(15, 500);
+      ctx.fillText(data.dateStr, PAD, y + 14);
+      y += 26;
+      ctx.strokeStyle = IMG.line; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(PAD, y + 8); ctx.lineTo(W - PAD, y + 8); ctx.stroke();
+      y += 26;
+
+      var cards = [
+        ["Replications", data.s.n || 0],
+        ["Average", data.s.n ? fmt(data.s.avg) : "–"],
+        ["Median", data.s.n ? fmt(data.s.median) : "–"],
+        ["Mode", data.s.n ? (data.s.mode === null ? "—" : fmt(data.s.mode)) : "–"],
+        ["Minimum", data.s.n ? fmt(data.s.min) : "–"],
+        ["Maximum", data.s.n ? fmt(data.s.max) : "–"],
+        ["Range", data.s.n ? fmt(data.s.range) : "–"]
+      ];
+      var gap = 14, cols = 2, cardW = (innerW - gap * (cols - 1)) / cols, cardH = 76;
+      for (var i = 0; i < cards.length; i++) {
+        var cx = PAD + (i % cols) * (cardW + gap);
+        var cy = y + Math.floor(i / cols) * (cardH + gap);
+        ctx.fillStyle = IMG.card; imgRR(ctx, cx, cy, cardW, cardH, 14); ctx.fill();
+        ctx.fillStyle = IMG.muted; ctx.font = imgFont(12, 700); ctx.textAlign = "left";
+        ctx.fillText(String(cards[i][0]).toUpperCase(), cx + 16, cy + 26);
+        ctx.fillStyle = IMG.ink; ctx.font = imgFont(26, 800);
+        ctx.fillText(imgEllipsize(ctx, String(cards[i][1]), cardW - 32), cx + 16, cy + 58);
+      }
+      var rows = Math.ceil(cards.length / cols);
+      y += rows * cardH + (rows - 1) * gap + 30;
+
+      function sectionHeader(label) {
+        ctx.fillStyle = IMG.teal; imgRR(ctx, PAD, y - 2, 4, 20, 2); ctx.fill();
+        ctx.fillStyle = IMG.ink; ctx.font = imgFont(19, 800); ctx.textAlign = "left";
+        ctx.fillText(label, PAD + 14, y + 16);
+        y += 40;
+      }
+
+      // Specification
+      sectionHeader("Specification");
+      var sp = data.spec;
+      ctx.font = imgFont(15, 600); ctx.textAlign = "left";
+      function chip(txt, x) {
+        var w = ctx.measureText(txt).width + 28;
+        ctx.fillStyle = IMG.card; imgRR(ctx, x, y, w, 34, 10); ctx.fill();
+        ctx.fillStyle = IMG.ink; ctx.fillText(txt, x + 14, y + 22);
+        return w;
+      }
+      var w1 = chip("LSL  " + (sp.lsl === null ? "not set" : fmt(sp.lsl)), PAD);
+      chip("USL  " + (sp.usl === null ? "not set" : fmt(sp.usl)), PAD + w1 + 12);
+      y += 48;
+
+      var catRows = [
+        ["Under spec", sp.under, IMG.under],
+        ["In spec", sp.inSpec, IMG.inSp],
+        ["Over spec", sp.over, IMG.over]
+      ];
+      var n = sp.n || 0;
+      for (var r = 0; r < catRows.length; r++) {
+        var cnt = catRows[r][1], col = catRows[r][2];
+        var pctv = (sp.haveSpec && n) ? Math.round((cnt / n) * 1000) / 10 : 0;
+        var ry = y + r * 44;
+        ctx.fillStyle = IMG.muted; ctx.font = imgFont(14, 600); ctx.textAlign = "left";
+        ctx.fillText(catRows[r][0], PAD, ry + 14);
+        var barX = PAD, barY = ry + 22, barW = innerW - 120, barH = 12;
+        ctx.fillStyle = IMG.line; imgRR(ctx, barX, barY, barW, barH, 6); ctx.fill();
+        if (sp.haveSpec && n) {
+          ctx.fillStyle = col; imgRR(ctx, barX, barY, Math.max(barW * cnt / n, cnt ? 6 : 0), barH, 6); ctx.fill();
+        }
+        ctx.fillStyle = IMG.ink; ctx.font = imgFont(15, 800); ctx.textAlign = "right";
+        ctx.fillText(sp.haveSpec ? (pctv + "%  ·  " + cnt) : String(cnt), W - PAD, ry + 20);
+      }
+      y += catRows.length * 44 + 18;
+
+      // Distribution
+      function divider(label) {
+        ctx.strokeStyle = IMG.line; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(PAD, y + 12); ctx.lineTo(W - PAD, y + 12); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = imgFont(12, 700); ctx.textAlign = "center";
+        var tw = ctx.measureText(label).width + 16;
+        ctx.fillStyle = IMG.bg; ctx.fillRect(W / 2 - tw / 2, y + 4, tw, 16);
+        ctx.fillStyle = IMG.muted; ctx.fillText(label, W / 2, y + 16);
+        y += 24;
+      }
+      sectionHeader("Distribution");
+      var d = data.dist;
+      if (d && d.bins.length) {
+        var maxCount = 0;
+        d.bins.forEach(function (b) { if (b.count > maxCount) maxCount = b.count; });
+        var lblW = 74, cntW = 42, trackX = PAD + lblW, trackW = innerW - lblW - cntW, rowH = 26;
+        var prev = null;
+        d.bins.forEach(function (b) {
+          if (d.hasSpec && prev !== null) {
+            if (prev === "under" && b.cls !== "under" && d.lsl !== null) divider("LSL = " + fmt(d.lsl));
+            if (prev !== "over" && b.cls === "over" && d.usl !== null) divider("USL = " + fmt(d.usl));
+          }
+          prev = b.cls;
+          var col = b.cls === "under" ? IMG.under : b.cls === "over" ? IMG.over : IMG.inSp;
+          ctx.fillStyle = IMG.muted; ctx.font = imgFont(13, 600); ctx.textAlign = "right";
+          ctx.fillText(b.lo.toFixed(d.dec), PAD + lblW - 12, y + 16);
+          ctx.fillStyle = IMG.line; imgRR(ctx, trackX, y + 6, trackW, 13, 6); ctx.fill();
+          if (b.count) { ctx.fillStyle = col; imgRR(ctx, trackX, y + 6, Math.max(trackW * b.count / maxCount, 6), 13, 6); ctx.fill(); }
+          ctx.fillStyle = IMG.ink; ctx.font = imgFont(13, 700); ctx.textAlign = "left";
+          ctx.fillText(String(b.count), trackX + trackW + 10, y + 17);
+          y += rowH;
+        });
+      }
+      y += 12;
+
+      // All replications
+      sectionHeader("All replications (" + data.values.length + ")");
+      var vals = data.values, cnt2 = vals.length;
+      var vcols = cnt2 <= 10 ? 1 : cnt2 <= 30 ? 2 : cnt2 <= 80 ? 3 : 4;
+      var vgap = 16, vcolW = (innerW - vgap * (vcols - 1)) / vcols, vrowH = 30;
+      var vrows = Math.ceil(cnt2 / vcols) || 0;
+      for (var vi = 0; vi < cnt2; vi++) {
+        var colI = Math.floor(vi / vrows), rowI = vi % vrows;
+        var vx = PAD + colI * (vcolW + vgap), vy = y + rowI * vrowH;
+        ctx.fillStyle = (vi % 2 === 0) ? IMG.card : "rgba(20,29,46,0.45)";
+        imgRR(ctx, vx, vy, vcolW, vrowH - 6, 7); ctx.fill();
+        var it = vals[vi];
+        if (it.tag) {
+          ctx.fillStyle = it.tag === "UNDER" ? IMG.under : IMG.over;
+          imgRR(ctx, vx, vy, 4, vrowH - 6, 2); ctx.fill();
+        }
+        ctx.fillStyle = IMG.muted; ctx.font = imgFont(12, 600); ctx.textAlign = "left";
+        ctx.fillText("Rep " + it.k, vx + 12, vy + 16);
+        ctx.fillStyle = it.tag ? (it.tag === "UNDER" ? IMG.under : IMG.over) : IMG.ink;
+        ctx.font = imgFont(14, 800); ctx.textAlign = "right";
+        ctx.fillText(fmt(it.v), vx + vcolW - 12, vy + 16);
+      }
+      y += vrows * vrowH + 14;
+
+      // Footer
+      ctx.strokeStyle = IMG.line; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(W - PAD, y); ctx.stroke();
+      y += 8;
+      ctx.fillStyle = IMG.muted; ctx.font = imgFont(13, 600); ctx.textAlign = "center";
+      ctx.fillText("Specification Recorder · v. 1.0 · by Chan", W / 2, y + 14);
+      y += 26;
+
+      return y + PAD;
+    }
+
+    // Measure on a tiny throwaway canvas, then draw for real at the true height.
+    var tmp = document.createElement("canvas"); tmp.width = 8; tmp.height = 8;
+    var H = Math.ceil(render(tmp.getContext("2d")));
+    var cv = document.createElement("canvas");
+    cv.width = W * S; cv.height = H * S;
+    var ctx = cv.getContext("2d");
+    ctx.scale(S, S);
+    ctx.fillStyle = IMG.bg; ctx.fillRect(0, 0, W, H);
+    render(ctx);
+    return cv;
+  }
+
+  function saveImage() {
+    if (state.values.length === 0) {
+      window.alert("Nothing to save yet — add some replications first.");
+      return;
+    }
+    var cv = drawSummaryCanvas(collectSummaryData());
+    var displayName = state.recordName.trim() || specDisplay() || "Specification Recorder";
+    var filename =
+      (state.recordName.trim() || specDisplay() || "record_qc")
+        .replace(/[^a-z0-9]+/gi, "_").toLowerCase() + ".png";
+
+    function downloadURL(url) {
+      try {
+        var a = document.createElement("a");
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      } catch (e) { /* ignore */ }
+    }
+
+    if (!cv.toBlob) { downloadURL(cv.toDataURL("image/png")); return; }
+
+    cv.toBlob(function (blob) {
+      if (!blob) { downloadURL(cv.toDataURL("image/png")); return; }
+      // Prefer the native share sheet on mobile (Save to Photos/Files, message,
+      // etc.) — a blob download often fails inside an installed PWA on iOS.
+      try {
+        var file = new File([blob], filename, { type: "image/png" });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          navigator.share({ files: [file], title: displayName })
+            .catch(function () { /* user cancelled — no-op */ });
+          return;
+        }
+      } catch (e) { /* fall through to download */ }
+      downloadURL(URL.createObjectURL(blob));
+    }, "image/png");
+  }
+
   /* ---------- Navigation ---------- */
   function showPage(which) {
     var entry = which === "entry";
@@ -924,6 +1198,13 @@
     rebuildGrid();
 
     renderAll();
+
+    // Save image is wired last and defensively: this feature is additive, so a
+    // failure here must never prevent the listeners above (name / spec / step
+    // inputs, tabs, keypad) from being attached.
+    try {
+      if (els.saveImgBtn) els.saveImgBtn.addEventListener("click", saveImage);
+    } catch (e) { /* ignore */ }
   }
 
   /* ---------- Service worker (offline / installable) ---------- */
